@@ -1,0 +1,8 @@
+{
+    "question": "What's your favorite game character?",
+    "options": [
+      {"text": "Mario", "media": "mario.png", "type": "image"},
+      {"text": "Link", "media": "link.png", "type": "image"},
+      {"text": "Pikachu", "media": "pikachu.png", "type": "image"}
+    ]
+  }
