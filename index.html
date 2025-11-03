@@ -311,18 +311,23 @@ setAnchor = function(x, y) {
 };
 
 /* ============================= UNIFIED TAP HANDLER ============================= */
+/* ============================= UNIFIED TAP HANDLER (FIXED FOR DPI) ============================= */
 canvas.addEventListener('click', function(e) {
       const rect = canvas.getBoundingClientRect();
-      const tapX = e.clientX - rect.left;
-      const tapY = e.clientY - rect.top;
     
-      // === 1. PLACEMENT (only if not placed) ===
+      // === Convert CSS tap to CANVAS pixel coordinates ===
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const tapX = (e.clientX - rect.left) * scaleX;
+      const tapY = (e.clientY - rect.top) * scaleY;
+    
+      // === 1. PLACEMENT ===
       if (!placed && images.length > 0) {
         setAnchor(tapX, tapY);
-        return; // STOP HERE — NO VOTE
+        return;
       }
     
-      // === 2. VOTING (only if placed) ===
+      // === 2. VOTING ===
       if (placed && anchor) {
         const pos = getCurrentPos();
         if (!pos) return;
@@ -339,12 +344,13 @@ canvas.addEventListener('click', function(e) {
           }
         });
       }
-    });
+    });  
   }
 };
 </script>
 </body>
 </html>
+
 
 
 
