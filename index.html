@@ -2,162 +2,103 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>AR Poll (Works on iPhone!)</title>
+  <title>AR Poll - iOS Quick Look Edition</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <style>
-    body { margin: 0; overflow: hidden; font-family: sans-serif; }
-    #start-btn {
-      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      padding: 16px 32px; font-size: 18px; z-index: 100; background: #007AFF; color: white;
-      border: none; border-radius: 12px; cursor: pointer;
-    }
-    #ui { position: absolute; top: 20px; left: 0; width: 100%; text-align: center; color: white; z-index: 10; }
-    #fallback { color: #FF3B30; font-weight: bold; }
+    body { margin: 0; overflow: hidden; font-family: -apple-system, sans-serif; background: #000; color: #fff; }
+    #ui { position: absolute; top: 20px; left: 0; width: 100%; text-align: center; z-index: 10; }
+    #start-btn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 16px 32px; font-size: 18px; background: #007AFF; color: white; border: none; border-radius: 12px; cursor: pointer; z-index: 10; }
+    #question { font-size: 24px; margin-bottom: 10px; }
+    #fallback { color: #FF3B30; font-size: 16px; }
+    .option { display: inline-block; margin: 10px; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 8px; cursor: pointer; }
+    #ar-scene { width: 100vw; height: 100vh; display: none; } /* For AR.js fallback */
   </style>
-  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+  <!-- AR.js for non-iOS fallback -->
+  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
 </head>
 <body>
-  <button id="start-btn">Start AR Poll</button>
   <div id="ui">
     <div id="question"></div>
+    <div id="instructions">Tap an option to vote in AR!</div>
     <div id="fallback" style="display:none;"></div>
   </div>
+  <button id="start-btn">Start AR Poll</button>
 
-  <a-scene id="scene" embedded background="color: #000">
-    <a-camera id="camera" position="0 1.6 0"></a-camera>
-    <a-sky color="#87CEEB"></a-sky>
+  <a-scene id="ar-scene" embedded arjs="sourceType: webcam; debugUIEnabled: false;">
+    <a-camera gps-camera rotation-reader></a-camera>
+    <a-entity id="marker"></a-entity>
   </a-scene>
 
   <script>
-    // === HARDCODED POLL DATA (no fetch issues) ===
+    // Hardcoded poll data with USDZ links (replace with your hosted USDZ files)
     const pollData = {
       question: "What's your favorite game character?",
       options: [
-        { text: "Mario", media: "https://i.imgur.com/8QbJ0mF.png", type: "image" },
-        { text: "Link", media: "https://i.imgur.com/5vX9g7J.png", type: "image" },
-        { text: "Pikachu", media: "https://i.imgur.com/3xZ7kLm.png", type: "image" }
+        { text: "Mario", usdz: "https://developer.apple.com/augmented-reality/quick-look/models/anim_fox.usdz" }, // Placeholder: Fox model; replace with mario.usdz
+        { text: "Link", usdz: "https://developer.apple.com/augmented-reality/quick-look/models/teapot.usdz" }, // Placeholder: Teapot; replace with link.usdz
+        { text: "Pikachu", usdz: "https://developer.apple.com/augmented-reality/quick-look/models/monster.usdz" } // Placeholder: Monster; replace with pikachu.usdz
       ]
     };
 
-    // === DETECT iOS + CHROME ===
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    const isChrome = /Chrome/.test(navigator.userAgent) && /Safari/.test(navigator.userAgent) && !/CriOS/.test(navigator.userAgent);
+    const startBtn = document.getElementById('start-btn');
+    const questionEl = document.getElementById('question');
+    const fallbackEl = document.getElementById('fallback');
+    const scene = document.getElementById('ar-scene');
 
-    document.getElementById('start-btn').addEventListener('click', () => {
-      document.getElementById('start-btn').remove();
+    startBtn.addEventListener('click', () => {
+      startBtn.style.display = 'none';
+      questionEl.textContent = pollData.question;
 
-      if (isIOS && isChrome) {
-        // FORCE 3D MODE on iOS Chrome
-        document.getElementById('fallback').textContent = "iOS Chrome: 3D mode (AR not supported)";
-        document.getElementById('fallback').style.display = 'block';
-        start3DMode();
-      } else if (navigator.xr && await navigator.xr.isSessionSupported('immersive-ar')) {
-        // Try AR on supported devices (Safari on iOS)
-        startARMode();
+      // Detect iOS for Quick Look
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      if (isIOS) {
+        // iOS: Use AR Quick Look
+        displayQuickLookOptions();
       } else {
-        // All other cases: 3D fallback
-        document.getElementById('fallback').textContent = "AR not supported. 3D mode active.";
-        document.getElementById('fallback').style.display = 'block';
-        start3DMode();
+        // Non-iOS: AR.js fallback (markerless)
+        fallbackEl.textContent = "Using markerless AR (point at surfaces).";
+        fallbackEl.style.display = 'block';
+        scene.style.display = 'block';
+        displayARJSOptions();
       }
     });
 
-    function start3DMode() {
-      document.getElementById('question').textContent = pollData.question;
-      placeOptionsIn3D();
+    function displayQuickLookOptions() {
+      pollData.options.forEach(option => {
+        const link = document.createElement('a');
+        link.href = option.usdz;
+        link.rel = 'ar'; // Triggers Quick Look AR
+        link.className = 'option';
+        link.innerHTML = `<strong>${option.text}</strong><br><small>Tap to view in AR & Vote</small>`;
+        link.addEventListener('click', (e) => {
+          // Optional: Track vote before AR launch
+          setTimeout(() => alert(`Voted for ${option.text}!`), 1000); // Delay for AR transition
+        });
+        document.getElementById('ui').appendChild(link);
+      });
     }
 
-    async function startARMode() {
-      try {
-        const session = await navigator.xr.requestSession('immersive-ar', {
-          requiredFeatures: ['hit-test'],
-          domOverlay: { root: document.body }
-        });
-        const scene = document.getElementById('scene');
-        scene.setAttribute('xrweb', '');
-        scene.renderer.xr.setSession(session);
-        document.getElementById('question').textContent = pollData.question;
-
-        // Hit-test logic (simplified)
-        const refSpace = await session.requestReferenceSpace('viewer');
-        const hitSource = await session.requestHitTestSource({ space: refSpace });
-        const localSpace = await session.requestReferenceSpace('local');
-
-        session.requestAnimationFrame(function onFrame(time, frame) {
-          const hits = frame.getHitTestResults(hitSource);
-          if (hits.length > 0 && !scene.hasAttribute('data-placed')) {
-            const pose = hits[0].getPose(localSpace);
-            placeOptionsInAR(pose.transform.position);
-            scene.setAttribute('data-placed', 'true');
-          }
-          session.requestAnimationFrame(onFrame);
-        });
-      } catch (e) {
-        console.error("AR failed:", e);
-        document.getElementById('fallback').textContent = "AR failed. Using 3D mode.";
-        document.getElementById('fallback').style.display = 'block';
-        start3DMode();
-      }
-    }
-
-    function placeOptionsIn3D() {
-      const scene = document.getElementById('scene');
-      pollData.options.forEach((opt, i) => {
+    function displayARJSOptions() {
+      // Place options as image markers or planes in AR.js
+      pollData.options.forEach((option, index) => {
         const entity = document.createElement('a-plane');
-        entity.setAttribute('src', opt.media);
-        entity.setAttribute('width', 1);
-        entity.setAttribute('height', 1);
-        entity.setAttribute('position', `${i * 1.5 - 1.5} 1.6 -3`);
-        entity.setAttribute('material', 'transparent: true');
+        entity.setAttribute('src', option.usdz || '#default-texture'); // Fallback texture
+        entity.setAttribute('position', `${index * 1.5 - 1.5} 0 -2`);
+        entity.setAttribute('rotation', '-90 0 0');
+        entity.setAttribute('width', '1');
+        entity.setAttribute('height', '1');
 
         const text = document.createElement('a-text');
-        text.setAttribute('value', opt.text);
+        text.setAttribute('value', option.text);
         text.setAttribute('position', '0 -0.6 0');
         text.setAttribute('align', 'center');
-        text.setAttribute('color', 'black');
         entity.appendChild(text);
 
-        entity.addEventListener('click', () => {
-          alert(`You voted: ${opt.text}`);
-        });
-
-        scene.appendChild(entity);
-      });
-
-      // Add cursor
-      const cursor = document.createElement('a-entity');
-      cursor.setAttribute('cursor', 'fuse: false');
-      cursor.setAttribute('position', '0 0 -1');
-      cursor.setAttribute('geometry', 'primitive: ring; radiusInner: 0.02; radiusOuter: 0.03');
-      cursor.setAttribute('material', 'color: white; shader: flat');
-      document.querySelector('a-camera').appendChild(cursor);
-    }
-
-    function placeOptionsInAR(pos) {
-      const scene = document.getElementById('scene');
-      pollData.options.forEach((opt, i) => {
-        const entity = document.createElement('a-plane');
-        entity.setAttribute('src', opt.media);
-        entity.setAttribute('width', 0.5);
-        entity.setAttribute('height', 0.5);
-        entity.setAttribute('position', `${pos.x + i * 0.6 - 0.6} ${pos.y + 0.5} ${pos.z - 1}`);
-        entity.setAttribute('material', 'transparent: true');
-
-        const text = document.createElement('a-text');
-        text.setAttribute('value', opt.text);
-        text.setAttribute('position', '0 -0.3 0');
-        text.setAttribute('scale', '0.5 0.5 0.5');
-        text.setAttribute('align', 'center');
-        text.setAttribute('color', 'black');
-        entity.appendChild(text);
-
-        entity.addEventListener('click', () => {
-          alert(`You voted: ${opt.text}`);
-        });
-
+        entity.addEventListener('click', () => alert(`Voted for ${option.text}!`));
         scene.appendChild(entity);
       });
     }
   </script>
 </body>
 </html>
+
