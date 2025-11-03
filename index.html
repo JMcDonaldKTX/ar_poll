@@ -3,18 +3,30 @@
 <head>
   <meta charset="utf-8">
   <title>AR Poll</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <style>
+    body { margin: 0; overflow: hidden; }
+    #ar-scene { width: 100vw; height: 100vh; }
+    #fallback-message, #error-message { 
+      position: absolute; 
+      top: 10px; 
+      width: 100%; 
+      text-align: center; 
+      color: red; 
+      font-size: 16px; 
+      z-index: 10; 
+    }
+  </style>
   <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
   <script src="poll.js"></script>
 </head>
 <body>
-  <button id="start-ar">Start AR Poll</button>
-  <div id="fallback-message" style="display: none; position: absolute; top: 10px; width: 100%; text-align: center; color: red;">
-    AR not supported. Displaying in 3D mode for testing.
-  </div>
-  <a-scene id="ar-scene" embedded arjs="sourceType: webcam; debugUIEnabled: false;" xr-mode-ui="enabled: false">
-    <a-camera position="0 1.6 0"></a-camera> <!-- Added for 3D mode -->
+  <button id="start-ar" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10;">Start AR Poll</button>
+  <div id="fallback-message" style="display: none;">AR not supported. Displaying in 3D mode for testing.</div>
+  <div id="error-message" style="display: none;"></div>
+  <a-scene id="ar-scene" embedded>
+    <a-camera position="0 1.6 0"></a-camera>
+    <a-sky color="#ECECEC"></a-sky>
   </a-scene>
 </body>
-
 </html>
