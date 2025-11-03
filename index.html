@@ -62,7 +62,29 @@ async function loadImages() {
     });
   }));
 }
-
+  
+/* ============================= LOAD VIDEOS ============================= */
+async function loadVideos() {
+  return Promise.all(characters.map(ch => {
+    return new Promise((res, rej) => {
+      if (ch.type !== 'video') return res(ch);
+      const vid = document.createElement('video');
+      vid.crossOrigin = 'anonymous';
+      vid.muted = true;
+      vid.playsInline = true;
+      vid.loop = true;
+      vid.autoplay = true;
+      vid.src = ch.src;
+      vid.load();
+      vid.oncanplay = () => {
+        vid.play().catch(() => {});
+        res({ vid, name: ch.name });
+      };
+      vid.onerror = () => rej(`Failed: ${ch.src}`);
+    });
+  }));
+}
+  
 /* ============================= START CAMERA ============================= */
 async function startCamera() {
   try {
@@ -137,19 +159,26 @@ function render() {
       const size = Math.min(canvas.width * 0.2, canvas.height * 0.3);
       const spacing = size * 0.2;
 
-      images.forEach((img, i) => {
+      images.forEach((item, i) => {
         const x = pos.x + (i - 1) * (size + spacing) - size / 2;
         const y = pos.y - size / 2;
-        ctx.drawImage(img.img, x, y, size, size);
-
+      
+        if (item.vid) {
+          // It's a video — draw current frame
+          ctx.drawImage(item.vid, x, y, size, size);
+        } else if (item.img) {
+          // It's an image (fallback)
+          ctx.drawImage(item.img, x, y, size, size);
+        }
+      
         // Label
         ctx.fillStyle = 'white';
         ctx.strokeStyle = 'black';
         ctx.lineWidth = 3;
         ctx.font = 'bold 20px sans-serif';
         ctx.textAlign = 'center';
-        ctx.strokeText(img.name, x + size/2, y + size + 25);
-        ctx.fillText(img.name, x + size/2, y + size + 25);
+        ctx.strokeText(item.name, x + size/2, y + size + 25);
+        ctx.fillText(item.name, x + size/2, y + size + 25);
       });
     }
   }
@@ -205,7 +234,7 @@ startBtn.onclick = async () => {
   }
 
   try {
-    images = await loadImages();
+    images = await loadVideos();
     status.textContent = 'Tap screen to place characters';
     placeBtn.style.display = 'inline-block';
   } catch (e) {
@@ -309,6 +338,7 @@ canvas.onclick = function(e) {
 </script>
 </body>
 </html>
+
 
 
 
