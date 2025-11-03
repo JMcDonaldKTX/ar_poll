@@ -1,238 +1,103 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="utf-8">
-<title>World-Anchored Characters (iPhone)</title>
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<style>
-  body,html{margin:0;padding:0;overflow:hidden;background:#000;font-family:sans-serif;}
-  #container{position:relative;width:100vw;height:100vh;}
-  video,canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;}
-  canvas{z-index:1;}
-  #ui{position:absolute;bottom:20px;left:0;width:100%;text-align:center;z-index:2;color:#fff;}
-  button{margin:8px;padding:12px 20px;font-size:16px;background:#007AFF;color:#fff;border:none;border-radius:8px;}
-</style>
+  <meta charset="utf-8">
+  <title>AR Poll - Scan & Vote</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <style>
+    body { margin: 0; overflow: hidden; font-family: sans-serif; }
+    #ui { position: absolute; top: 20px; left: 0; width: 100%; text-align: center; color: white; z-index: 10; background: rgba(0,0,0,0.5); padding: 10px; }
+    button { padding: 12px 24px; font-size: 18px; background: #007AFF; color: white; border: none; border-radius: 8px; cursor: pointer; }
+    #status { color: #FF3B30; font-size: 14px; margin: 10px 0; }
+  </style>
+  <!-- AR.js + A-Frame -->
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
 </head>
 <body>
+  <div id="ui">
+    <h2 id="question">What's your favorite game character?</h2>
+    <button id="start-ar">Start AR Poll</button>
+    <div id="status"></div>
+  </div>
 
-<div id="container">
-  <video id="cam" autoplay playsinline muted></video>
-  <canvas id="overlay"></canvas>
-</div>
+  <a-scene embedded arjs="sourceType: webcam; detectionMode: mono_and_matrix; matrixCodeType: bch; debugUIEnabled: false;">
+    <!-- Camera -->
+    <a-entity camera></a-entity>
 
-<div id="ui">
-  <button id="startBtn">Start Camera</button>
-  <button id="placeBtn" style="display:none;">Place Characters Here</button>
-  <p id="info" style="margin:8px 0;font-size:14px;"></p>
-</div>
+    <!-- NFT (Natural Feature Tracking) for markerless surface detection -->
+    <a-nft type="nft" url="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="></a-nft> <!-- Placeholder NFT dataset; generate custom for better tracking -->
 
-<script>
-/* ==============================================================
-   CONFIG – put your PNGs in the same folder (or use full URLs)
-   ============================================================== */
-const characters = [
-  {name:"Mario",   src:"mario.png"},
-  {name:"Link",    src:"link.png"},
-  {name:"Pikachu", src:"pikachu.png"}
-];
+    <!-- Options will be placed here on detection -->
+  </a-scene>
 
-/* ==============================================================
-   Global vars
-   ============================================================== */
-const video   = document.getElementById('cam');
-const canvas  = document.getElementById('overlay');
-const ctx     = canvas.getContext('2d');
-const startBtn= document.getElementById('startBtn');
-const placeBtn= document.getElementById('placeBtn');
-const info    = document.getElementById('info');
+  <script>
+    const startBtn = document.getElementById('start-ar');
+    const status = document.getElementById('status');
+    const scene = document.querySelector('a-scene');
+    const nft = document.querySelector('a-nft');
 
-let stream    = null;
-let imgs      = [];           // loaded Image objects
-let anchor    = null;         // {alpha,beta,gamma} when user pressed "Place"
-let placed    = false;
+    // Poll data (add your media paths)
+    const pollData = {
+      question: "What's your favorite game character?",
+      options: [
+        { text: "Mario", media: "mario.png", type: "image" },
+        { text: "Link", media: "link.gif", type: "gif" },
+        { text: "Pikachu", media: "pikachu.mp4", type: "video" }
+      ]
+    };
 
-/* ==============================================================
-   1. Load images
-   ============================================================== */
-function loadImages() {
-  return Promise.all(characters.map(ch => {
-    return new Promise((res,rej)=>{
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload  = () => res({img, name:ch.name});
-      img.onerror = () => rej(`Failed: ${ch.src}`);
-      img.src = ch.src;
+    startBtn.addEventListener('click', () => {
+      startBtn.style.display = 'none';
+      status.textContent = 'Detecting surface... Point at a flat area (table/floor).';
+      scene.setAttribute('visible', true);
+
+      // Place options on first NFT detection (surface found)
+      nft.addEventListener('loaded', () => {
+        placeOptions();
+        status.textContent = 'Options anchored! Tap to vote.';
+        setTimeout(() => status.textContent = '', 3000);
+      });
     });
-  }));
-}
 
-/* ==============================================================
-   2. Start rear camera
-   ============================================================== */
-async function startCamera() {
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: {facingMode:'environment'},
-      audio: false
-    });
-    video.srcObject = stream;
-    video.play();
-    return true;
-  } catch(e){
-    info.textContent = 'Camera error: '+e.message;
-    return false;
-  }
-}
+    function placeOptions() {
+      pollData.options.forEach((option, index) => {
+        let entity;
+        if (option.type === 'image' || option.type === 'gif') {
+          entity = document.createElement('a-plane');
+          entity.setAttribute('material', `src: ${option.media}; transparent: true; repeat: 1 1`);
+          entity.setAttribute('width', 0.8);
+          entity.setAttribute('height', 0.8);
+        } else if (option.type === 'video') {
+          entity = document.createElement('a-video');
+          entity.setAttribute('src', option.media);
+          entity.setAttribute('width', 0.8);
+          entity.setAttribute('height', 0.8);
+          entity.setAttribute('autoplay', true);
+          entity.setAttribute('loop', true);
+        }
 
-/* ==============================================================
-   3. Resize canvas to match video
-   ============================================================== */
-function resize() {
-  const {videoWidth:w, videoHeight:h} = video;
-  if(!w) return;
-  canvas.width  = w;
-  canvas.height = h;
-}
+        // Anchor to NFT (surface); space horizontally
+        entity.setAttribute('position', `${(index - 1) * 1.0} 0.5 0`);
+        entity.setAttribute('look-at', '[camera]'); // Face user
 
-/* ==============================================================
-   4. Device orientation → screen offset
-   ============================================================== */
-let lastAlpha = 0, lastBeta = 0, lastGamma = 0;
-function handleOrientation(e) {
-  if(!e.alpha || !e.beta || !e.gamma) return;
-  lastAlpha = e.alpha;   // 0-360° (heading)
-  lastBeta  = e.beta;    // -180-180° (tilt front/back)
-  lastGamma = e.gamma;   // -90-90°  (tilt left/right)
-}
+        // Label
+        const text = document.createElement('a-text');
+        text.setAttribute('value', option.text);
+        text.setAttribute('position', '0 -0.5 0');
+        text.setAttribute('align', 'center');
+        text.setAttribute('color', 'black');
+        entity.appendChild(text);
 
-/* --------------------------------------------------------------
-   Convert angular difference (degrees) → pixels on screen
-   -------------------------------------------------------------- */
-function angularToPixels(deltaDeg, axis) {
-  const fov = 60;                     // rough horizontal FOV of iPhone camera
-  const pixelsPerDeg = canvas.width / fov;
-  return deltaDeg * pixelsPerDeg;
-}
+        // Vote on tap
+        entity.addEventListener('click', () => {
+          alert(`Voted for ${option.text}!`);
+          // Optional: fetch('/vote', { method: 'POST', body: JSON.stringify({ vote: option.text }) });
+        });
 
-/* --------------------------------------------------------------
-   Compute current screen position of a world-anchored point
-   -------------------------------------------------------------- */
-function getScreenPos() {
-  if(!anchor) return null;
-
-  // ----- Yaw (alpha) → horizontal shift -----
-  let dAlpha = lastAlpha - anchor.alpha;
-  // normalize to -180…180
-  if (dAlpha > 180) dAlpha -= 360;
-  if (dAlpha < -180) dAlpha += 360;
-  const offsetX = angularToPixels(dAlpha, 'alpha');
-
-  // ----- Pitch (beta) → vertical shift -----
-  const dBeta = lastBeta - anchor.beta;
-  const offsetY = angularToPixels(dBeta, 'beta');
-
-  // ----- Roll (gamma) – we ignore it for a simple anchor -----
-  return {
-    x: canvas.width/2 + offsetX,
-    y: canvas.height/2 + offsetY
-  };
-}
-
-/* ==============================================================
-   5. Main render loop
-   ============================================================== */
-function render() {
-  if (video.readyState < 2) { requestAnimationFrame(render); return; }
-
-  // 1. draw camera
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-  // 2. if anchored → draw characters at world-fixed spot
-  if (placed && anchor) {
-    const pos = getScreenPos();
-    if (pos) {
-      const size = Math.min(canvas.width*0.22, canvas.height*0.35);
-      const spacing = size * 0.2;
-      imgs.forEach((item,i) => {
-        const x = pos.x + (i-1)* (size + spacing) - size/2;
-        const y = pos.y - size/2;
-        ctx.drawImage(item.img, x, y, size, size);
-        // optional label
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 24px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(item.name, x+size/2, y+size+30);
+        nft.appendChild(entity);
       });
     }
-  }
-
-  requestAnimationFrame(render);
-}
-
-/* ==============================================================
-   6. UI – start → place → vote
-   ============================================================== */
-startBtn.onclick = async () => {
-  startBtn.disabled = true;
-  const ok = await startCamera();
-  if(!ok) return;
-
-  video.addEventListener('loadedmetadata',()=>{ resize(); render(); },{once:true});
-
-  // request orientation permission (iOS 13+)
-  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-    DeviceOrientationEvent.requestPermission()
-      .then(resp => { if(resp==='granted') window.addEventListener('deviceorientation',handleOrientation); })
-      .catch(()=>{ info.textContent='Orientation permission denied'; });
-  } else {
-    window.addEventListener('deviceorientation',handleOrientation);
-  }
-
-  // load images
-  try{
-    imgs = await loadImages();
-    info.textContent = `${imgs.length} characters ready`;
-    setTimeout(()=>{info.textContent='';},1500);
-    placeBtn.style.display='inline-block';
-  }catch(e){
-    info.textContent = e;
-  }
-};
-
-placeBtn.onclick = () => {
-  if(!imgs.length) return;
-  // capture current orientation as anchor
-  anchor = {alpha:lastAlpha, beta:lastBeta, gamma:lastGamma};
-  placed = true;
-  placeBtn.style.display='none';
-  info.textContent='Characters anchored! Move phone – they stay put.';
-  setTimeout(()=>{info.textContent='';},2500);
-};
-
-/* --------------------------------------------------------------
-   7. Tap to vote (hit-test on the anchored images)
-   -------------------------------------------------------------- */
-canvas.addEventListener('click', e => {
-  if(!placed) return;
-  const rect = canvas.getBoundingClientRect();
-  const tapX = e.clientX - rect.left;
-  const tapY = e.clientY - rect.top;
-  const pos = getScreenPos();
-  if(!pos) return;
-
-  const size = Math.min(canvas.width*0.22, canvas.height*0.35);
-  const spacing = size * 0.2;
-
-  imgs.forEach((item,i) => {
-    const x = pos.x + (i-1)*(size+spacing) - size/2;
-    const y = pos.y - size/2;
-    if (tapX>=x && tapX<=x+size && tapY>=y && tapY<=y+size) {
-      alert(`You voted for ${item.name}!`);
-      // TODO: fetch('/vote', {method:'POST', body:JSON.stringify({choice:item.name})});
-    }
-  });
-});
-</script>
-
+  </script>
 </body>
 </html>
