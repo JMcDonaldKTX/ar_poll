@@ -157,7 +157,7 @@ function render() {
     const pos = getCurrentPos();
     if (pos) {
       const size = Math.min(canvas.width * 0.2, canvas.height * 0.3);
-      const spacing = size * 0.2;
+      const spacing = size * 0.5;
 
       images.forEach((item, i) => {
         const x = pos.x + (i - 1) * (size + spacing) - size / 2;
@@ -175,7 +175,7 @@ function render() {
         ctx.fillStyle = 'white';
         ctx.strokeStyle = 'black';
         ctx.lineWidth = 3;
-        ctx.font = 'bold 20px sans-serif';
+        ctx.font = 'bold 16px sans-serif';
         ctx.textAlign = 'center';
         ctx.strokeText(item.name, x + size/2, y + size + 25);
         ctx.fillText(item.name, x + size/2, y + size + 25);
@@ -345,6 +345,7 @@ canvas.addEventListener('click', function(e) {
 </script>
 </body>
 </html>
+
 
 
 
