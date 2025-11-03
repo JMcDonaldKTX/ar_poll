@@ -2,102 +2,216 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>AR Poll - Scan & Vote</title>
+  <title>AR Poll - Tap to Place</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <style>
-    body { margin: 0; overflow: hidden; font-family: sans-serif; }
-    #ui { position: absolute; top: 20px; left: 0; width: 100%; text-align: center; color: white; z-index: 10; background: rgba(0,0,0,0.5); padding: 10px; }
-    button { padding: 12px 24px; font-size: 18px; background: #007AFF; color: white; border: none; border-radius: 8px; cursor: pointer; }
-    #status { color: #FF3B30; font-size: 14px; margin: 10px 0; }
+    * { margin:0; padding:0; }
+    body, html { overflow:hidden; background:#000; font-family:sans-serif; }
+    #container { position:relative; width:100vw; height:100vh; }
+    video, canvas { position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; }
+    canvas { z-index:2; }
+    #ui { position:absolute; top:0; left:0; width:100%; padding:15px; color:#fff; text-align:center; z-index:3; }
+    button { padding:12px 24px; margin:5px; font-size:18px; background:#007AFF; color:#fff; border:none; border-radius:8px; }
+    #status { color:#ff3b30; font-size:14px; margin-top:8px; }
   </style>
-  <!-- AR.js + A-Frame -->
-  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
-  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
 </head>
 <body>
-  <div id="ui">
-    <h2 id="question">What's your favorite game character?</h2>
-    <button id="start-ar">Start AR Poll</button>
-    <div id="status"></div>
-  </div>
 
-  <a-scene embedded arjs="sourceType: webcam; detectionMode: mono_and_matrix; matrixCodeType: bch; debugUIEnabled: false;">
-    <!-- Camera -->
-    <a-entity camera></a-entity>
+<div id="container">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+</div>
 
-    <!-- NFT (Natural Feature Tracking) for markerless surface detection -->
-    <a-nft type="nft" url="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="></a-nft> <!-- Placeholder NFT dataset; generate custom for better tracking -->
+<div id="ui">
+  <h2>AR Character Poll</h2>
+  <button id="start">Start Camera</button>
+  <button id="place" style="display:none">Tap Screen to Place Characters</button>
+  <div id="status"></div>
+</div>
 
-    <!-- Options will be placed here on detection -->
-  </a-scene>
+<script>
+/* ============================= CONFIG ============================= */
+const characters = [
+  { name: "Mario",   src: "mario.png" },
+  { name: "Link",    src: "link.png"  },
+  { name: "Pikachu", src: "pikachu.png" }
+];
 
-  <script>
-    const startBtn = document.getElementById('start-ar');
-    const status = document.getElementById('status');
-    const scene = document.querySelector('a-scene');
-    const nft = document.querySelector('a-nft');
+/* ============================= GLOBALS ============================= */
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const startBtn = document.getElementById('start');
+const placeBtn = document.getElementById('place');
+const status = document.getElementById('status');
 
-    // Poll data (add your media paths)
-    const pollData = {
-      question: "What's your favorite game character?",
-      options: [
-        { text: "Mario", media: "mario.png", type: "image" },
-        { text: "Link", media: "link.gif", type: "gif" },
-        { text: "Pikachu", media: "pikachu.mp4", type: "video" }
-      ]
-    };
+let stream;
+let images = [];
+let anchor = null;  // {x, y, alpha, beta}
+let placed = false;
 
-    startBtn.addEventListener('click', () => {
-      startBtn.style.display = 'none';
-      status.textContent = 'Detecting surface... Point at a flat area (table/floor).';
-      scene.setAttribute('visible', true);
-
-      // Place options on first NFT detection (surface found)
-      nft.addEventListener('loaded', () => {
-        placeOptions();
-        status.textContent = 'Options anchored! Tap to vote.';
-        setTimeout(() => status.textContent = '', 3000);
-      });
+/* ============================= LOAD IMAGES ============================= */
+async function loadImages() {
+  return Promise.all(characters.map(ch => {
+    return new Promise((res, rej) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => res({img, name: ch.name});
+      img.onerror = () => rej(`Failed: ${ch.src}`);
+      img.src = ch.src;
     });
+  }));
+}
 
-    function placeOptions() {
-      pollData.options.forEach((option, index) => {
-        let entity;
-        if (option.type === 'image' || option.type === 'gif') {
-          entity = document.createElement('a-plane');
-          entity.setAttribute('material', `src: ${option.media}; transparent: true; repeat: 1 1`);
-          entity.setAttribute('width', 0.8);
-          entity.setAttribute('height', 0.8);
-        } else if (option.type === 'video') {
-          entity = document.createElement('a-video');
-          entity.setAttribute('src', option.media);
-          entity.setAttribute('width', 0.8);
-          entity.setAttribute('height', 0.8);
-          entity.setAttribute('autoplay', true);
-          entity.setAttribute('loop', true);
-        }
+/* ============================= START CAMERA ============================= */
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' },
+      audio: false
+    });
+    video.srcObject = stream;
+    video.play();
+    return true;
+  } catch (e) {
+    status.textContent = 'Camera failed: ' + e.message;
+    return false;
+  }
+}
 
-        // Anchor to NFT (surface); space horizontally
-        entity.setAttribute('position', `${(index - 1) * 1.0} 0.5 0`);
-        entity.setAttribute('look-at', '[camera]'); // Face user
+/* ============================= RESIZE CANVAS ============================= */
+function resize() {
+  const {videoWidth: w, videoHeight: h} = video;
+  if (!w || !h) return;
+  canvas.width = w;
+  canvas.height = h;
+}
+
+/* ============================= GYROSCOPE ============================= */
+let alpha = 0, beta = 0;
+window.addEventListener('deviceorientation', e => {
+  if (e.alpha !== null) alpha = e.alpha;
+  if (e.beta !== null)  beta = e.beta;
+});
+
+/* ============================= ANCHOR MATH ============================= */
+function setAnchor(x, y) {
+  anchor = { x, y, alpha, beta };
+  placed = true;
+  placeBtn.style.display = 'none';
+  status.textContent = 'Characters anchored! Move phone.';
+  setTimeout(() => status.textContent = '', 2000);
+}
+
+function getCurrentPos() {
+  if (!anchor) return null;
+
+  const dAlpha = alpha - anchor.alpha;
+  const dBeta = beta - anchor.beta;
+
+  // Convert degrees to screen pixels (approx FOV: 60° horizontal)
+  const pixelsPerDeg = canvas.width / 60;
+  const offsetX = dAlpha * pixelsPerDeg;
+  const offsetY = dBeta * pixelsPerDeg;
+
+  return {
+    x: anchor.x + offsetX,
+    y: anchor.y + offsetY
+  };
+}
+
+/* ============================= RENDER LOOP ============================= */
+function render() {
+  if (video.readyState < 2) {
+    requestAnimationFrame(render);
+    return;
+  }
+
+  // Draw camera
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  // Draw anchored characters
+  if (placed && anchor) {
+    const pos = getCurrentPos();
+    if (pos) {
+      const size = Math.min(canvas.width * 0.2, canvas.height * 0.3);
+      const spacing = size * 0.2;
+
+      images.forEach((img, i) => {
+        const x = pos.x + (i - 1) * (size + spacing) - size / 2;
+        const y = pos.y - size / 2;
+        ctx.drawImage(img.img, x, y, size, size);
 
         // Label
-        const text = document.createElement('a-text');
-        text.setAttribute('value', option.text);
-        text.setAttribute('position', '0 -0.5 0');
-        text.setAttribute('align', 'center');
-        text.setAttribute('color', 'black');
-        entity.appendChild(text);
-
-        // Vote on tap
-        entity.addEventListener('click', () => {
-          alert(`Voted for ${option.text}!`);
-          // Optional: fetch('/vote', { method: 'POST', body: JSON.stringify({ vote: option.text }) });
-        });
-
-        nft.appendChild(entity);
+        ctx.fillStyle = 'white';
+        ctx.strokeStyle = 'black';
+        ctx.lineWidth = 3;
+        ctx.font = 'bold 20px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.strokeText(img.name, x + size/2, y + size + 25);
+        ctx.fillText(img.name, x + size/2, y + size + 25);
       });
     }
-  </script>
+  }
+
+  requestAnimationFrame(render);
+}
+
+/* ============================= TAP TO PLACE ============================= */
+canvas.addEventListener('click', e => {
+  if (!placed && images.length > 0) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setAnchor(x, y);
+  } else if (placed) {
+    // Vote detection
+    const pos = getCurrentPos();
+    if (!pos) return;
+    const size = Math.min(canvas.width * 0.2, canvas.height * 0.3);
+    const spacing = size * 0.2;
+
+    images.forEach((img, i) => {
+      const x = pos.x + (i - 1) * (size + spacing) - size / 2;
+      const y = pos.y - size / 2;
+      if (e.clientX >= rect.left + x && e.clientX <= rect.left + x + size &&
+          e.clientY >= rect.top + y && e.clientY <= rect.top + y + size) {
+        alert(`Voted: ${img.name}`);
+        // fetch('/vote', {method:'POST', body: JSON.stringify({vote: img.name})});
+      }
+    });
+  }
+});
+
+/* ============================= START ============================= */
+startBtn.onclick = async () => {
+  startBtn.disabled = true;
+  status.textContent = 'Starting camera...';
+
+  const camOk = await startCamera();
+  if (!camOk) return;
+
+  video.addEventListener('loadedmetadata', () => {
+    resize();
+    render();
+  }, {once: true});
+
+  // Request motion permission on iOS
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission().catch(() => {
+      status.textContent = 'Motion permission denied';
+    });
+  }
+
+  try {
+    images = await loadImages();
+    status.textContent = 'Tap screen to place characters';
+    placeBtn.style.display = 'inline-block';
+  } catch (e) {
+    status.textContent = e.message;
+  }
+};
+</script>
+
 </body>
 </html>
