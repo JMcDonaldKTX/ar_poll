@@ -2,18 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Camera + Fixed PNG/USDZ Overlay</title>
+<title>World-Anchored Characters (iPhone)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <style>
-  body,html{margin:0;padding:0;overflow:hidden;background:#000;}
+  body,html{margin:0;padding:0;overflow:hidden;background:#000;font-family:sans-serif;}
   #container{position:relative;width:100vw;height:100vh;}
   video,canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;}
   canvas{z-index:1;}
-  #ui{position:absolute;top:0;left:0;width:100%;padding:12px;color:#fff;text-align:center;z-index:2;font-family:sans-serif;}
-  #startBtn{
-    margin-top:20px;padding:12px 24px;font-size:18px;
-    background:#007AFF;color:#fff;border:none;border-radius:8px;
-  }
+  #ui{position:absolute;bottom:20px;left:0;width:100%;text-align:center;z-index:2;color:#fff;}
+  button{margin:8px;padding:12px 20px;font-size:16px;background:#007AFF;color:#fff;border:none;border-radius:8px;}
 </style>
 </head>
 <body>
@@ -24,155 +21,216 @@
 </div>
 
 <div id="ui">
-  <h2 id="question"></h2>
-  <button id="startBtn">Start Camera & Load Characters</button>
-  <p id="status" style="display:none;"></p>
+  <button id="startBtn">Start Camera</button>
+  <button id="placeBtn" style="display:none;">Place Characters Here</button>
+  <p id="info" style="margin:8px 0;font-size:14px;"></p>
 </div>
 
 <script>
-/* --------------------------------------------------------------
-   CONFIG – put your own assets here
-   -------------------------------------------------------------- */
-const poll = {
-  question: "Pick your favourite character",
-  options: [
-    { name: "Mario",   src: "mario.png"   },   // PNG (transparent works)
-    { name: "Link",    src: "link.png"    },
-    { name: "Pikachu", src: "pikachu.png" }
-  ]
-};
+/* ==============================================================
+   CONFIG – put your PNGs in the same folder (or use full URLs)
+   ============================================================== */
+const characters = [
+  {name:"Mario",   src:"mario.png"},
+  {name:"Link",    src:"link.png"},
+  {name:"Pikachu", src:"pikachu.png"}
+];
 
-/* --------------------------------------------------------------
+/* ==============================================================
    Global vars
-   -------------------------------------------------------------- */
+   ============================================================== */
 const video   = document.getElementById('cam');
 const canvas  = document.getElementById('overlay');
 const ctx     = canvas.getContext('2d');
 const startBtn= document.getElementById('startBtn');
-const status  = document.getElementById('status');
-const questionEl = document.getElementById('question');
+const placeBtn= document.getElementById('placeBtn');
+const info    = document.getElementById('info');
 
-let assets = [];          // {img, x, y, w, h}
-let anchorsSet = false;   // true after first frame → lock positions
+let stream    = null;
+let imgs      = [];           // loaded Image objects
+let anchor    = null;         // {alpha,beta,gamma} when user pressed "Place"
+let placed    = false;
 
-/* --------------------------------------------------------------
-   1. Load PNG images (USDZ not supported on canvas)
-   -------------------------------------------------------------- */
-function loadAssets() {
-  return Promise.all(
-    poll.options.map(opt => {
-      return new Promise((resolve,reject)=> {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';          // needed if files are on another domain
-        img.onload = () => resolve({img, name:opt.name, src:opt.src});
-        img.onerror = () => reject(new Error(`Failed to load ${opt.src}`));
-        img.src = opt.src;
-      });
-    })
-  );
+/* ==============================================================
+   1. Load images
+   ============================================================== */
+function loadImages() {
+  return Promise.all(characters.map(ch => {
+    return new Promise((res,rej)=>{
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload  = () => res({img, name:ch.name});
+      img.onerror = () => rej(`Failed: ${ch.src}`);
+      img.src = ch.src;
+    });
+  }));
 }
 
-/* --------------------------------------------------------------
-   2. Start camera
-   -------------------------------------------------------------- */
+/* ==============================================================
+   2. Start rear camera
+   ============================================================== */
 async function startCamera() {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment' },   // rear camera
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {facingMode:'environment'},
       audio: false
     });
     video.srcObject = stream;
     video.play();
     return true;
-  } catch (e) {
-    status.textContent = 'Camera error: ' + e.message;
-    status.style.display = 'block';
+  } catch(e){
+    info.textContent = 'Camera error: '+e.message;
     return false;
   }
 }
 
-/* --------------------------------------------------------------
-   3. Resize canvas to match video (preserves aspect)
-   -------------------------------------------------------------- */
-function resizeCanvas() {
-  const {videoWidth, videoHeight} = video;
-  if (!videoWidth) return;
-  canvas.width  = videoWidth;
-  canvas.height = videoHeight;
+/* ==============================================================
+   3. Resize canvas to match video
+   ============================================================== */
+function resize() {
+  const {videoWidth:w, videoHeight:h} = video;
+  if(!w) return;
+  canvas.width  = w;
+  canvas.height = h;
+}
+
+/* ==============================================================
+   4. Device orientation → screen offset
+   ============================================================== */
+let lastAlpha = 0, lastBeta = 0, lastGamma = 0;
+function handleOrientation(e) {
+  if(!e.alpha || !e.beta || !e.gamma) return;
+  lastAlpha = e.alpha;   // 0-360° (heading)
+  lastBeta  = e.beta;    // -180-180° (tilt front/back)
+  lastGamma = e.gamma;   // -90-90°  (tilt left/right)
 }
 
 /* --------------------------------------------------------------
-   4. Main render loop
+   Convert angular difference (degrees) → pixels on screen
    -------------------------------------------------------------- */
+function angularToPixels(deltaDeg, axis) {
+  const fov = 60;                     // rough horizontal FOV of iPhone camera
+  const pixelsPerDeg = canvas.width / fov;
+  return deltaDeg * pixelsPerDeg;
+}
+
+/* --------------------------------------------------------------
+   Compute current screen position of a world-anchored point
+   -------------------------------------------------------------- */
+function getScreenPos() {
+  if(!anchor) return null;
+
+  // ----- Yaw (alpha) → horizontal shift -----
+  let dAlpha = lastAlpha - anchor.alpha;
+  // normalize to -180…180
+  if (dAlpha > 180) dAlpha -= 360;
+  if (dAlpha < -180) dAlpha += 360;
+  const offsetX = angularToPixels(dAlpha, 'alpha');
+
+  // ----- Pitch (beta) → vertical shift -----
+  const dBeta = lastBeta - anchor.beta;
+  const offsetY = angularToPixels(dBeta, 'beta');
+
+  // ----- Roll (gamma) – we ignore it for a simple anchor -----
+  return {
+    x: canvas.width/2 + offsetX,
+    y: canvas.height/2 + offsetY
+  };
+}
+
+/* ==============================================================
+   5. Main render loop
+   ============================================================== */
 function render() {
   if (video.readyState < 2) { requestAnimationFrame(render); return; }
 
-  // 1. draw camera frame
+  // 1. draw camera
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  // 2. first frame → set world anchors
-  if (!anchorsSet) {
-    const vw = canvas.width, vh = canvas.height;
-    assets.forEach((a,i) => {
-      const size = Math.min(vw*0.25, vh*0.35);   // 25 % of width, max 35 % height
-      const x = (i * (vw/3)) + (vw/6) - size/2; // evenly spaced
-      const y = vh*0.45 - size/2;              // middle vertically
-      a.x = x; a.y = y; a.w = size; a.h = size;
-    });
-    anchorsSet = true;
+  // 2. if anchored → draw characters at world-fixed spot
+  if (placed && anchor) {
+    const pos = getScreenPos();
+    if (pos) {
+      const size = Math.min(canvas.width*0.22, canvas.height*0.35);
+      const spacing = size * 0.2;
+      imgs.forEach((item,i) => {
+        const x = pos.x + (i-1)* (size + spacing) - size/2;
+        const y = pos.y - size/2;
+        ctx.drawImage(item.img, x, y, size, size);
+        // optional label
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 24px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(item.name, x+size/2, y+size+30);
+      });
+    }
   }
-
-  // 3. draw anchored images
-  assets.forEach(a => {
-    ctx.drawImage(a.img, a.x, a.y, a.w, a.h);
-  });
 
   requestAnimationFrame(render);
 }
 
+/* ==============================================================
+   6. UI – start → place → vote
+   ============================================================== */
+startBtn.onclick = async () => {
+  startBtn.disabled = true;
+  const ok = await startCamera();
+  if(!ok) return;
+
+  video.addEventListener('loadedmetadata',()=>{ resize(); render(); },{once:true});
+
+  // request orientation permission (iOS 13+)
+  if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission()
+      .then(resp => { if(resp==='granted') window.addEventListener('deviceorientation',handleOrientation); })
+      .catch(()=>{ info.textContent='Orientation permission denied'; });
+  } else {
+    window.addEventListener('deviceorientation',handleOrientation);
+  }
+
+  // load images
+  try{
+    imgs = await loadImages();
+    info.textContent = `${imgs.length} characters ready`;
+    setTimeout(()=>{info.textContent='';},1500);
+    placeBtn.style.display='inline-block';
+  }catch(e){
+    info.textContent = e;
+  }
+};
+
+placeBtn.onclick = () => {
+  if(!imgs.length) return;
+  // capture current orientation as anchor
+  anchor = {alpha:lastAlpha, beta:lastBeta, gamma:lastGamma};
+  placed = true;
+  placeBtn.style.display='none';
+  info.textContent='Characters anchored! Move phone – they stay put.';
+  setTimeout(()=>{info.textContent='';},2500);
+};
+
 /* --------------------------------------------------------------
-   5. Click → vote (simple alert, replace with fetch later)
+   7. Tap to vote (hit-test on the anchored images)
    -------------------------------------------------------------- */
 canvas.addEventListener('click', e => {
+  if(!placed) return;
   const rect = canvas.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
+  const tapX = e.clientX - rect.left;
+  const tapY = e.clientY - rect.top;
+  const pos = getScreenPos();
+  if(!pos) return;
 
-  for (const a of assets) {
-    if (x >= a.x && x <= a.x+a.w && y >= a.y && y <= a.y+a.h) {
-      alert(`You voted for ${a.name}!`);
-      // TODO: send vote to server
-      break;
+  const size = Math.min(canvas.width*0.22, canvas.height*0.35);
+  const spacing = size * 0.2;
+
+  imgs.forEach((item,i) => {
+    const x = pos.x + (i-1)*(size+spacing) - size/2;
+    const y = pos.y - size/2;
+    if (tapX>=x && tapX<=x+size && tapY>=y && tapY<=y+size) {
+      alert(`You voted for ${item.name}!`);
+      // TODO: fetch('/vote', {method:'POST', body:JSON.stringify({choice:item.name})});
     }
-  }
-});
-
-/* --------------------------------------------------------------
-   6. UI – start everything
-   -------------------------------------------------------------- */
-startBtn.addEventListener('click', async () => {
-  startBtn.disabled = true;
-  questionEl.textContent = poll.question;
-
-  const camOK = await startCamera();
-  if (!camOK) return;
-
-  // wait for first video frame
-  video.addEventListener('loadedmetadata', () => {
-    resizeCanvas();
-    render();
-  }, {once:true});
-
-  try {
-    const loaded = await loadAssets();
-    assets = loaded;
-    status.textContent = `${assets.length} characters loaded`;
-    status.style.display = 'block';
-    setTimeout(()=>status.style.display='none',2000);
-  } catch (err) {
-    status.textContent = err.message;
-    status.style.display = 'block';
-  }
+  });
 });
 </script>
 
