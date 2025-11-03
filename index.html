@@ -1,105 +1,180 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>AR Poll - iOS Quick Look Edition</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-  <style>
-    body { margin: 0; overflow: hidden; font-family: -apple-system, sans-serif; background: #000; color: #fff; }
-    #ui { position: absolute; top: 20px; left: 0; width: 100%; text-align: center; z-index: 10; }
-    #start-btn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 16px 32px; font-size: 18px; background: #007AFF; color: white; border: none; border-radius: 12px; cursor: pointer; z-index: 10; }
-    #question { font-size: 24px; margin-bottom: 10px; }
-    #fallback { color: #FF3B30; font-size: 16px; }
-    .option { display: inline-block; margin: 10px; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 8px; cursor: pointer; }
-    #ar-scene { width: 100vw; height: 100vh; display: none; } /* For AR.js fallback */
-  </style>
-  <!-- AR.js for non-iOS fallback -->
-  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+<meta charset="utf-8">
+<title>Camera + Fixed PNG/USDZ Overlay</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<style>
+  body,html{margin:0;padding:0;overflow:hidden;background:#000;}
+  #container{position:relative;width:100vw;height:100vh;}
+  video,canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;}
+  canvas{z-index:1;}
+  #ui{position:absolute;top:0;left:0;width:100%;padding:12px;color:#fff;text-align:center;z-index:2;font-family:sans-serif;}
+  #startBtn{
+    margin-top:20px;padding:12px 24px;font-size:18px;
+    background:#007AFF;color:#fff;border:none;border-radius:8px;
+  }
+</style>
 </head>
 <body>
-  <div id="ui">
-    <div id="question"></div>
-    <div id="instructions">Tap an option to vote in AR!</div>
-    <div id="fallback" style="display:none;"></div>
-  </div>
-  <button id="start-btn">Start AR Poll</button>
 
-  <a-scene id="ar-scene" embedded arjs="sourceType: webcam; debugUIEnabled: false;">
-    <a-camera gps-camera rotation-reader></a-camera>
-    <a-entity id="marker"></a-entity>
-  </a-scene>
+<div id="container">
+  <video id="cam" autoplay playsinline muted></video>
+  <canvas id="overlay"></canvas>
+</div>
 
-  <script>
-    // Hardcoded poll data with USDZ links (replace with your hosted USDZ files)
-    const pollData = {
-      question: "What's your favorite game character?",
-      options: [
-        { text: "Mario", usdz: "mario.usdz" }, // Placeholder: Fox model; replace with mario.usdz
-        { text: "Link", usdz: "link.usdz" }, // Placeholder: Teapot; replace with link.usdz
-        { text: "Pikachu", usdz: "pikachu.usdz" } // Placeholder: Monster; replace with pikachu.usdz
-      ]
-    };
+<div id="ui">
+  <h2 id="question"></h2>
+  <button id="startBtn">Start Camera & Load Characters</button>
+  <p id="status" style="display:none;"></p>
+</div>
 
-    const startBtn = document.getElementById('start-btn');
-    const questionEl = document.getElementById('question');
-    const fallbackEl = document.getElementById('fallback');
-    const scene = document.getElementById('ar-scene');
+<script>
+/* --------------------------------------------------------------
+   CONFIG – put your own assets here
+   -------------------------------------------------------------- */
+const poll = {
+  question: "Pick your favourite character",
+  options: [
+    { name: "Mario",   src: "mario.png"   },   // PNG (transparent works)
+    { name: "Link",    src: "link.png"    },
+    { name: "Pikachu", src: "pikachu.png" }
+  ]
+};
 
-    startBtn.addEventListener('click', () => {
-      startBtn.style.display = 'none';
-      questionEl.textContent = pollData.question;
+/* --------------------------------------------------------------
+   Global vars
+   -------------------------------------------------------------- */
+const video   = document.getElementById('cam');
+const canvas  = document.getElementById('overlay');
+const ctx     = canvas.getContext('2d');
+const startBtn= document.getElementById('startBtn');
+const status  = document.getElementById('status');
+const questionEl = document.getElementById('question');
 
-      // Detect iOS for Quick Look
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-      if (isIOS) {
-        // iOS: Use AR Quick Look
-        displayQuickLookOptions();
-      } else {
-        // Non-iOS: AR.js fallback (markerless)
-        fallbackEl.textContent = "Using markerless AR (point at surfaces).";
-        fallbackEl.style.display = 'block';
-        scene.style.display = 'block';
-        displayARJSOptions();
-      }
+let assets = [];          // {img, x, y, w, h}
+let anchorsSet = false;   // true after first frame → lock positions
+
+/* --------------------------------------------------------------
+   1. Load PNG images (USDZ not supported on canvas)
+   -------------------------------------------------------------- */
+function loadAssets() {
+  return Promise.all(
+    poll.options.map(opt => {
+      return new Promise((resolve,reject)=> {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';          // needed if files are on another domain
+        img.onload = () => resolve({img, name:opt.name, src:opt.src});
+        img.onerror = () => reject(new Error(`Failed to load ${opt.src}`));
+        img.src = opt.src;
+      });
+    })
+  );
+}
+
+/* --------------------------------------------------------------
+   2. Start camera
+   -------------------------------------------------------------- */
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' },   // rear camera
+      audio: false
     });
+    video.srcObject = stream;
+    video.play();
+    return true;
+  } catch (e) {
+    status.textContent = 'Camera error: ' + e.message;
+    status.style.display = 'block';
+    return false;
+  }
+}
 
-    function displayQuickLookOptions() {
-      pollData.options.forEach(option => {
-        const link = document.createElement('a');
-        link.href = option.usdz;
-        link.rel = 'ar'; // Triggers Quick Look AR
-        link.className = 'option';
-        link.innerHTML = `<strong>${option.text}</strong><br><small>Tap to view in AR & Vote</small>`;
-        link.addEventListener('click', (e) => {
-          // Optional: Track vote before AR launch
-          setTimeout(() => alert(`Voted for ${option.text}!`), 1000); // Delay for AR transition
-        });
-        document.getElementById('ui').appendChild(link);
-      });
+/* --------------------------------------------------------------
+   3. Resize canvas to match video (preserves aspect)
+   -------------------------------------------------------------- */
+function resizeCanvas() {
+  const {videoWidth, videoHeight} = video;
+  if (!videoWidth) return;
+  canvas.width  = videoWidth;
+  canvas.height = videoHeight;
+}
+
+/* --------------------------------------------------------------
+   4. Main render loop
+   -------------------------------------------------------------- */
+function render() {
+  if (video.readyState < 2) { requestAnimationFrame(render); return; }
+
+  // 1. draw camera frame
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  // 2. first frame → set world anchors
+  if (!anchorsSet) {
+    const vw = canvas.width, vh = canvas.height;
+    assets.forEach((a,i) => {
+      const size = Math.min(vw*0.25, vh*0.35);   // 25 % of width, max 35 % height
+      const x = (i * (vw/3)) + (vw/6) - size/2; // evenly spaced
+      const y = vh*0.45 - size/2;              // middle vertically
+      a.x = x; a.y = y; a.w = size; a.h = size;
+    });
+    anchorsSet = true;
+  }
+
+  // 3. draw anchored images
+  assets.forEach(a => {
+    ctx.drawImage(a.img, a.x, a.y, a.w, a.h);
+  });
+
+  requestAnimationFrame(render);
+}
+
+/* --------------------------------------------------------------
+   5. Click → vote (simple alert, replace with fetch later)
+   -------------------------------------------------------------- */
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+
+  for (const a of assets) {
+    if (x >= a.x && x <= a.x+a.w && y >= a.y && y <= a.y+a.h) {
+      alert(`You voted for ${a.name}!`);
+      // TODO: send vote to server
+      break;
     }
+  }
+});
 
-    function displayARJSOptions() {
-      // Place options as image markers or planes in AR.js
-      pollData.options.forEach((option, index) => {
-        const entity = document.createElement('a-plane');
-        entity.setAttribute('src', option.usdz || '#default-texture'); // Fallback texture
-        entity.setAttribute('position', `${index * 1.5 - 1.5} 0 -2`);
-        entity.setAttribute('rotation', '-90 0 0');
-        entity.setAttribute('width', '1');
-        entity.setAttribute('height', '1');
+/* --------------------------------------------------------------
+   6. UI – start everything
+   -------------------------------------------------------------- */
+startBtn.addEventListener('click', async () => {
+  startBtn.disabled = true;
+  questionEl.textContent = poll.question;
 
-        const text = document.createElement('a-text');
-        text.setAttribute('value', option.text);
-        text.setAttribute('position', '0 -0.6 0');
-        text.setAttribute('align', 'center');
-        entity.appendChild(text);
+  const camOK = await startCamera();
+  if (!camOK) return;
 
-        entity.addEventListener('click', () => alert(`Voted for ${option.text}!`));
-        scene.appendChild(entity);
-      });
-    }
-  </script>
+  // wait for first video frame
+  video.addEventListener('loadedmetadata', () => {
+    resizeCanvas();
+    render();
+  }, {once:true});
+
+  try {
+    const loaded = await loadAssets();
+    assets = loaded;
+    status.textContent = `${assets.length} characters loaded`;
+    status.style.display = 'block';
+    setTimeout(()=>status.style.display='none',2000);
+  } catch (err) {
+    status.textContent = err.message;
+    status.style.display = 'block';
+  }
+});
+</script>
+
 </body>
 </html>
-
-
