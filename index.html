@@ -310,27 +310,34 @@ setAnchor = function(x, y) {
   placeBtn.remove(); // Clean removal
 };
 
-// ====== MODIFY TAP HANDLER TO USE sendVote() ======
-const originalTapHandler = canvas.onclick;
-canvas.onclick = function(e) {
-  if (!placed && images.length > 0) {
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    setAnchor(x, y);
-  } else if (placed) {
-    const pos = getCurrentPos();
-    if (!pos) return;
-    const rect = canvas.getBoundingClientRect();
-    const size = Math.min(canvas.width * 0.2, canvas.height * 0.3);
-    const spacing = size * 0.2;
-
-    images.forEach((img, i) => {
-      const x = pos.x + (i - 1) * (size + spacing) - size / 2;
-      const y = pos.y - size / 2;
-      if (e.clientX >= rect.left + x && e.clientX <= rect.left + x + size &&
-          e.clientY >= rect.top + y && e.clientY <= rect.top + y + size) {
-        sendVote(img.name);  // <-- NOW COUNTS & SYNCs
+/* ============================= UNIFIED TAP HANDLER ============================= */
+canvas.addEventListener('click', function(e) {
+      const rect = canvas.getBoundingClientRect();
+      const tapX = e.clientX - rect.left;
+      const tapY = e.clientY - rect.top;
+    
+      // === 1. PLACEMENT (only if not placed) ===
+      if (!placed && images.length > 0) {
+        setAnchor(tapX, tapY);
+        return; // STOP HERE — NO VOTE
+      }
+    
+      // === 2. VOTING (only if placed) ===
+      if (placed && anchor) {
+        const pos = getCurrentPos();
+        if (!pos) return;
+    
+        const size = Math.min(canvas.width * 0.2, canvas.height * 0.3);
+        const spacing = size * 0.2;
+    
+        images.forEach((item, i) => {
+          const x = pos.x + (i - 1) * (size + spacing) - size / 2;
+          const y = pos.y - size / 2;
+    
+          if (tapX >= x && tapX <= x + size && tapY >= y && tapY <= y + size) {
+            sendVote(item.name);
+          }
+        });
       }
     });
   }
@@ -338,6 +345,7 @@ canvas.onclick = function(e) {
 </script>
 </body>
 </html>
+
 
 
 
