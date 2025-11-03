@@ -2,31 +2,162 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>AR Poll</title>
+  <title>AR Poll (Works on iPhone!)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <style>
-    body { margin: 0; overflow: hidden; }
-    #ar-scene { width: 100vw; height: 100vh; }
-    #fallback-message, #error-message { 
-      position: absolute; 
-      top: 10px; 
-      width: 100%; 
-      text-align: center; 
-      color: red; 
-      font-size: 16px; 
-      z-index: 10; 
+    body { margin: 0; overflow: hidden; font-family: sans-serif; }
+    #start-btn {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      padding: 16px 32px; font-size: 18px; z-index: 100; background: #007AFF; color: white;
+      border: none; border-radius: 12px; cursor: pointer;
     }
+    #ui { position: absolute; top: 20px; left: 0; width: 100%; text-align: center; color: white; z-index: 10; }
+    #fallback { color: #FF3B30; font-weight: bold; }
   </style>
   <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
-  <script src="poll.js"></script>
 </head>
 <body>
-  <button id="start-ar" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10;">Start AR Poll</button>
-  <div id="fallback-message" style="display: none;">AR not supported. Displaying in 3D mode for testing.</div>
-  <div id="error-message" style="display: none;"></div>
-  <a-scene id="ar-scene" embedded>
-    <a-camera position="0 1.6 0"></a-camera>
-    <a-sky color="#ECECEC"></a-sky>
+  <button id="start-btn">Start AR Poll</button>
+  <div id="ui">
+    <div id="question"></div>
+    <div id="fallback" style="display:none;"></div>
+  </div>
+
+  <a-scene id="scene" embedded background="color: #000">
+    <a-camera id="camera" position="0 1.6 0"></a-camera>
+    <a-sky color="#87CEEB"></a-sky>
   </a-scene>
+
+  <script>
+    // === HARDCODED POLL DATA (no fetch issues) ===
+    const pollData = {
+      question: "What's your favorite game character?",
+      options: [
+        { text: "Mario", media: "https://i.imgur.com/8QbJ0mF.png", type: "image" },
+        { text: "Link", media: "https://i.imgur.com/5vX9g7J.png", type: "image" },
+        { text: "Pikachu", media: "https://i.imgur.com/3xZ7kLm.png", type: "image" }
+      ]
+    };
+
+    // === DETECT iOS + CHROME ===
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isChrome = /Chrome/.test(navigator.userAgent) && /Safari/.test(navigator.userAgent) && !/CriOS/.test(navigator.userAgent);
+
+    document.getElementById('start-btn').addEventListener('click', () => {
+      document.getElementById('start-btn').remove();
+
+      if (isIOS && isChrome) {
+        // FORCE 3D MODE on iOS Chrome
+        document.getElementById('fallback').textContent = "iOS Chrome: 3D mode (AR not supported)";
+        document.getElementById('fallback').style.display = 'block';
+        start3DMode();
+      } else if (navigator.xr && await navigator.xr.isSessionSupported('immersive-ar')) {
+        // Try AR on supported devices (Safari on iOS)
+        startARMode();
+      } else {
+        // All other cases: 3D fallback
+        document.getElementById('fallback').textContent = "AR not supported. 3D mode active.";
+        document.getElementById('fallback').style.display = 'block';
+        start3DMode();
+      }
+    });
+
+    function start3DMode() {
+      document.getElementById('question').textContent = pollData.question;
+      placeOptionsIn3D();
+    }
+
+    async function startARMode() {
+      try {
+        const session = await navigator.xr.requestSession('immersive-ar', {
+          requiredFeatures: ['hit-test'],
+          domOverlay: { root: document.body }
+        });
+        const scene = document.getElementById('scene');
+        scene.setAttribute('xrweb', '');
+        scene.renderer.xr.setSession(session);
+        document.getElementById('question').textContent = pollData.question;
+
+        // Hit-test logic (simplified)
+        const refSpace = await session.requestReferenceSpace('viewer');
+        const hitSource = await session.requestHitTestSource({ space: refSpace });
+        const localSpace = await session.requestReferenceSpace('local');
+
+        session.requestAnimationFrame(function onFrame(time, frame) {
+          const hits = frame.getHitTestResults(hitSource);
+          if (hits.length > 0 && !scene.hasAttribute('data-placed')) {
+            const pose = hits[0].getPose(localSpace);
+            placeOptionsInAR(pose.transform.position);
+            scene.setAttribute('data-placed', 'true');
+          }
+          session.requestAnimationFrame(onFrame);
+        });
+      } catch (e) {
+        console.error("AR failed:", e);
+        document.getElementById('fallback').textContent = "AR failed. Using 3D mode.";
+        document.getElementById('fallback').style.display = 'block';
+        start3DMode();
+      }
+    }
+
+    function placeOptionsIn3D() {
+      const scene = document.getElementById('scene');
+      pollData.options.forEach((opt, i) => {
+        const entity = document.createElement('a-plane');
+        entity.setAttribute('src', opt.media);
+        entity.setAttribute('width', 1);
+        entity.setAttribute('height', 1);
+        entity.setAttribute('position', `${i * 1.5 - 1.5} 1.6 -3`);
+        entity.setAttribute('material', 'transparent: true');
+
+        const text = document.createElement('a-text');
+        text.setAttribute('value', opt.text);
+        text.setAttribute('position', '0 -0.6 0');
+        text.setAttribute('align', 'center');
+        text.setAttribute('color', 'black');
+        entity.appendChild(text);
+
+        entity.addEventListener('click', () => {
+          alert(`You voted: ${opt.text}`);
+        });
+
+        scene.appendChild(entity);
+      });
+
+      // Add cursor
+      const cursor = document.createElement('a-entity');
+      cursor.setAttribute('cursor', 'fuse: false');
+      cursor.setAttribute('position', '0 0 -1');
+      cursor.setAttribute('geometry', 'primitive: ring; radiusInner: 0.02; radiusOuter: 0.03');
+      cursor.setAttribute('material', 'color: white; shader: flat');
+      document.querySelector('a-camera').appendChild(cursor);
+    }
+
+    function placeOptionsInAR(pos) {
+      const scene = document.getElementById('scene');
+      pollData.options.forEach((opt, i) => {
+        const entity = document.createElement('a-plane');
+        entity.setAttribute('src', opt.media);
+        entity.setAttribute('width', 0.5);
+        entity.setAttribute('height', 0.5);
+        entity.setAttribute('position', `${pos.x + i * 0.6 - 0.6} ${pos.y + 0.5} ${pos.z - 1}`);
+        entity.setAttribute('material', 'transparent: true');
+
+        const text = document.createElement('a-text');
+        text.setAttribute('value', opt.text);
+        text.setAttribute('position', '0 -0.3 0');
+        text.setAttribute('scale', '0.5 0.5 0.5');
+        text.setAttribute('align', 'center');
+        text.setAttribute('color', 'black');
+        entity.appendChild(text);
+
+        entity.addEventListener('click', () => {
+          alert(`You voted: ${opt.text}`);
+        });
+
+        scene.appendChild(entity);
+      });
+    }
+  </script>
 </body>
 </html>
