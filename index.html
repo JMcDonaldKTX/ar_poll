@@ -98,7 +98,7 @@ window.addEventListener('deviceorientation', e => {
 function setAnchor(x, y) {
   anchor = { x, y, alpha, beta };
   placed = true;
-  placeBtn.style.display = 'none';
+  placeBtn.remove(); // Completely gone
   status.textContent = 'Characters anchored! Move phone.';
   setTimeout(() => status.textContent = '', 2000);
 }
@@ -164,6 +164,7 @@ canvas.addEventListener('click', e => {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     setAnchor(x, y);
+    return; // stops the voting logic when you place the images
   } else if (placed) {
     // Vote detection
     const pos = getCurrentPos();
@@ -277,6 +278,7 @@ setAnchor = function(x, y) {
   originalSetAnchor(x, y);
   voteUI.style.display = 'block';
   updateVoteDisplay();
+  placeBtn.remove(); // Clean removal
 };
 
 // ====== MODIFY TAP HANDLER TO USE sendVote() ======
@@ -307,5 +309,6 @@ canvas.onclick = function(e) {
 </script>
 </body>
 </html>
+
 
 
